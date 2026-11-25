@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Ic } from "../components/common";
 import { Chips, PageHead, Status } from "../components/Bits";
 import { VALUES, VTag } from "../components/Vector";
 import { useAuth } from "../context/AuthContext";
-import { BADGES, HISTORY, LEADERS } from "../data/modules";
+import { BADGES } from "../data/modules";
+import { vectorScoreBadges } from "../services/vectorRewardsService";
+import { vectorRewardsService } from "../services/vectorRewardsService";
+import { profilesService } from "../services/profilesService";
 
 const ZERO = { V: 0, E: 0, C: 0, T: 0, O: 0, R: 0 };
 export const vectorOf = (u) => ({ ...ZERO, ...(u.vector || {}) });
@@ -13,9 +16,27 @@ export default function Rewards() {
   const [tab, setTab] = useState("Overview");
   const [lb, setLb] = useState("Overall");
   const [off, setOff] = useState("All");
+  const [awardHistory, setAwardHistory] = useState([]);
+  const [members, setMembers] = useState([]);
   const sc = vectorOf(user);
   const total = Object.values(sc).reduce((a, b) => a + b, 0);
-  const rows = LEADERS.filter((l) => lb !== "Office-wise" || off === "All" || l.office === off);
+  const scoreBadges = vectorScoreBadges(sc, user.badges);
+  useEffect(() => vectorRewardsService.subscribeUserAwards(
+    user.uid || user.email,
+    setAwardHistory,
+    () => setAwardHistory([])
+  ), [user.uid, user.email]);
+  useEffect(() => profilesService.subscribe(setMembers, () => setMembers([])), []);
+  const rows = members
+    .filter((member) => lb !== "Office-wise" || off === "All" || member.office === off)
+    .map((member) => ({
+      name: member.name,
+      office: member.office,
+      team: member.team || member.dept,
+      pts: Number(member.points) || 0,
+      badges: Number(member.badges) || 0,
+    }))
+    .sort((a, b) => b.pts - a.pts);
   return (
     <>
       <PageHead title="VECTOR Rewards" sub="Annual period: Apr 2026 to Mar 2027. Points come from reviewed contributions, never from likes or post volume." />
@@ -25,7 +46,7 @@ export default function Rewards() {
         <>
           <div className="card bd row" style={{ gap: 40, marginBottom: 16 }}>
             <div><div className="hint">Total eligible points</div><b style={{ fontSize: 30 }}>{total}</b></div>
-            <div><div className="hint">Badges earned</div><b style={{ fontSize: 30 }}>{BADGES.filter((b) => b.got).length}</b></div>
+            <div><div className="hint">Badges earned</div><b style={{ fontSize: 30 }}>{scoreBadges.length + user.badges.filter((badge) => !scoreBadges.includes(badge)).length}</b></div>
             <div><div className="hint">Current period</div><b style={{ fontSize: 16 }}>FY 2026–27</b></div>
           </div>
           <div className="grid">
@@ -44,8 +65,17 @@ export default function Rewards() {
       {tab === "Score history" && (
         <div className="card bd" style={{ overflowX: "auto" }}>
           <table className="tbl"><thead><tr><th>Date</th><th>Activity</th><th>Value</th><th>Points</th><th>Status</th></tr></thead>
-            <tbody>{HISTORY.map((h, i) => <tr key={i}><td>{h.d}</td><td>{h.a}</td><td>{h.v}</td><td>{h.p}</td><td><Status s={h.s} /></td></tr>)}</tbody></table>
-          <p className="hint" style={{ marginTop: 10 }}>Adjusted entries were reversed by a reviewer. Review notes are confidential.</p>
+            <tbody>{awardHistory.map((award) => {
+              const date = award.submittedAt?.toDate?.()
+                ? award.submittedAt.toDate()
+                : new Date(award.submittedAt || "");
+              const dateLabel = !Number.isNaN(date.getTime())
+                ? date.toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+                : "Recently";
+              return <tr key={award.id}><td>{dateLabel}</td><td>{award.eventTitle || award.activity}</td><td>{award.value || "Pending"}</td><td>{award.status === "Approved" ? award.points : 0}</td><td><Status s={award.status} /></td></tr>;
+            })}</tbody></table>
+          {!awardHistory.length && <p className="sub" style={{ margin: "10px 0 0" }}>No VECTOR submissions yet. Register for an event to begin.</p>}
+          <p className="hint" style={{ marginTop: 10 }}>Points appear after an admin approves the event submission.</p>
         </div>
       )}
 
@@ -57,7 +87,7 @@ export default function Rewards() {
               <h3 style={{ marginTop: 10 }}>{b.n}</h3><p style={{ margin: "4px 0 0" }}>{b.d}</p>
             </div>
           ))}
-          {user.badges.map((b) => <div key={b} className="card bd"><div className="row sp"><div className="ibox"><Ic n="globe" s={18} /></div><Status s="Earned" /></div><h3 style={{ marginTop: 10 }}>{b}</h3><p style={{ margin: "4px 0 0" }}>Earned from plans and exploring.</p></div>)}
+          {[...new Set([...user.badges, ...scoreBadges])].map((b) => <div key={b} className="card bd"><div className="row sp"><div className="ibox"><Ic n="trophy" s={18} /></div><Status s="Earned" /></div><h3 style={{ marginTop: 10 }}>{b}</h3><p style={{ margin: "4px 0 0" }}>Earned through verified VECTOR scores and contributions.</p></div>)}
         </div>
       )}
 

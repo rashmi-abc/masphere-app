@@ -16,6 +16,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<AuthPage />} />
+      <Route path="/" element={<Navigate to="/discover" replace />} />
       <Route element={<ProtectedLayout />}>
         <Route path="/discover" element={<Discover />} />
         <Route path="/sheroes" element={<WomenOnly><Sheroes /></WomenOnly>} />

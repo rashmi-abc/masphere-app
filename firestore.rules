@@ -5,6 +5,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.admin == true;
+    }
+
     function isSheroesMember() {
       let memberPath = /databases/$(database)/documents/sheroesMembers/$(request.auth.uid);
       let profilePath = /databases/$(database)/documents/users/$(request.auth.uid);
@@ -113,10 +119,13 @@ service cloud.firestore {
         && request.resource.data.email == request.auth.token.email
         && !request.resource.data.keys().hasAny(['admin']);
       allow update: if signedIn()
-        && request.auth.uid == uid
-        && request.resource.data.uid == resource.data.uid
-        && request.resource.data.email == resource.data.email
-        && request.resource.data.get('admin', false) == resource.data.get('admin', false);
+        && ((request.auth.uid == uid
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.get('admin', false) == resource.data.get('admin', false))
+          || (isAdmin()
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['points', 'vector', 'badges', 'stamps'])));
       allow delete: if signedIn() && request.auth.uid == uid;
 
       match /savedEvents/{eventId} {
@@ -126,6 +135,20 @@ service cloud.firestore {
       match /calendarEvents/{eventId} {
         allow read, write: if signedIn() && request.auth.uid == uid;
       }
+    }
+
+    match /vectorRules/{ruleId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /vectorAwards/{awardId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.recipientUid == request.auth.uid
+        && request.resource.data.status == 'Pending review';
+      allow update: if isAdmin();
+      allow delete: if false;
     }
 
     match /sheroesMembers/{uid} {

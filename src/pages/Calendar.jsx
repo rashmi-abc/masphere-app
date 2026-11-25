@@ -8,6 +8,7 @@ import { useUI } from "../context/UIContext";
 import { EVENT_CATS } from "../data/modules";
 import { OFFICES } from "../data/constants";
 import { todayStr } from "../utils/helpers";
+import { vectorRewardsService } from "../services/vectorRewardsService";
 
 const OFFS = OFFICES.filter((o) => o !== "Other");
 const CLS = { HR: "c1", MPL: "c2", Sheroes: "c3", Technical: "c4", Learning: "c5", Community: "c6" };
@@ -114,6 +115,7 @@ function EventCard({ e }) {
 }
 
 function EventDetail({ id }) {
+  const { user } = useAuth();
   const { events, savedEvents, calendarEvents, saveEvent, unsaveEvent, addEventToCalendar, removeEventFromCalendar } = useModules();
   const { setModal, tt } = useUI();
   const e = events.find((x) => x.id === id);
@@ -153,7 +155,15 @@ function EventDetail({ id }) {
               }
             } catch (error) { tt(error.message); }
           }}>{onCalendar ? "Remove from my calendar" : "Add to my calendar"}</button>
-          {e.reg && <button className="btn" disabled={reg || rs === "Registration closed"} onClick={() => { setReg(true); tt("Registered"); }}>{reg ? "Registered" : "Register"}</button>}
+          {e.reg && <button className="btn" disabled={reg || rs === "Registration closed"} onClick={async () => {
+            try {
+              await vectorRewardsService.submitEventParticipation(user, e);
+              setReg(true);
+              tt("Registered and sent for VECTOR review");
+            } catch (error) {
+              tt(error.message);
+            }
+          }}>{reg ? "Registered" : "Register"}</button>}
         </div>
       </div>
     </>
