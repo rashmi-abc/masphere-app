@@ -1,0 +1,328 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSheroesMember() {
+      let memberPath = /databases/$(database)/documents/sheroesMembers/$(request.auth.uid);
+      let profilePath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return signedIn()
+        && exists(memberPath)
+        && exists(profilePath)
+        && get(profilePath).data.gender in ['Woman', 'Female'];
+    }
+
+    function profileName(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data.name;
+    }
+
+    function validSheroesLikeChange() {
+      let previous = resource.data.get('likedBy', []);
+      let next = request.resource.data.get('likedBy', []);
+      return request.resource.data.likes == next.size()
+        && ((previous.hasAny([request.auth.uid])
+            && !next.hasAny([request.auth.uid])
+            && previous.size() == next.size() + 1
+            && previous.hasAll(next))
+          || (!previous.hasAny([request.auth.uid])
+            && next.hasAny([request.auth.uid])
+            && next.size() == previous.size() + 1
+            && next.hasAll(previous)));
+    }
+
+    function validSheroesCommentChange() {
+      let previous = resource.data.get('comments', []);
+      let next = request.resource.data.get('comments', []);
+      return next.size() == previous.size() + 1
+        && next[previous.size()].author == profileName(request.auth.uid)
+        && next[previous.size()].text is string
+        && next[previous.size()].text.size() > 0
+        && next[previous.size()].text.size() <= 500;
+    }
+
+    function ownsPlan(planId) {
+      return signedIn()
+        && get(/databases/$(database)/documents/plans/$(planId)).data.hostId == request.auth.uid;
+    }
+
+    function planHasRoom(planId) {
+      let plan = get(/databases/$(database)/documents/plans/$(planId)).data;
+      let members = plan.get('members', []);
+      let maxPeople = plan.get('maxPeople', 0);
+      return !plan.get('completed', false)
+        && members is list
+        && maxPeople is int
+        && maxPeople >= 2
+        && maxPeople <= 100
+        && members.size() < maxPeople;
+    }
+
+    function isPlanMember(planId) {
+      let plan = get(/databases/$(database)/documents/plans/$(planId)).data;
+      let requestPath = /databases/$(database)/documents/plans/$(planId)/joinRequests/$(request.auth.uid);
+      return signedIn()
+        && (plan.hostId == request.auth.uid
+          || plan.get('members', []).hasAny([request.auth.uid])
+          || (exists(requestPath) && get(requestPath).data.status == 'accepted'));
+    }
+
+    function validInterestChange() {
+      let previous = resource.data.get('interested', []);
+      let next = request.resource.data.get('interested', []);
+      return (previous.hasAny([request.auth.uid])
+          && next.hasAny([request.auth.uid])
+          && next.size() == previous.size()
+          && next.hasAll(previous))
+        || (!previous.hasAny([request.auth.uid])
+          && next.hasAny([request.auth.uid])
+          && next.size() == previous.size() + 1
+          && next.hasAll(previous));
+    }
+
+    function validLikeChange() {
+      let previous = resource.data.get('likedBy', []);
+      let next = request.resource.data.get('likedBy', []);
+      return request.resource.data.likes == next.size()
+        && ((previous.hasAny([request.auth.uid])
+            && !next.hasAny([request.auth.uid])
+            && previous.size() == next.size() + 1
+            && previous.hasAll(next))
+          || (!previous.hasAny([request.auth.uid])
+            && next.hasAny([request.auth.uid])
+            && next.size() == previous.size() + 1
+            && next.hasAll(previous)));
+    }
+
+    function validCommentChange() {
+      let previous = resource.data.get('comments', []);
+      let next = request.resource.data.get('comments', []);
+      return !resource.data.get('commentsOff', false)
+        && next.size() == previous.size() + 1
+        && next[previous.size()].author == profileName(request.auth.uid)
+        && next[previous.size()].text is string
+        && next[previous.size()].text.size() > 0;
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.email == request.auth.token.email
+        && !request.resource.data.keys().hasAny(['admin']);
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.get('admin', false) == resource.data.get('admin', false);
+      allow delete: if signedIn() && request.auth.uid == uid;
+
+      match /savedEvents/{eventId} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
+
+      match /calendarEvents/{eventId} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
+    }
+
+    match /sheroesMembers/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.gender in ['Woman', 'Female']
+        && request.resource.data.keys().hasOnly(['uid', 'name', 'joinedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.name == profileName(request.auth.uid);
+      allow update, delete: if false;
+    }
+
+    match /posts/{postId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.likes == 0
+        && request.resource.data.likedBy.size() == 0
+        && request.resource.data.author == profileName(request.auth.uid)
+        && request.resource.data.office == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.office;
+      allow update: if signedIn()
+        && ((resource.data.authorId == request.auth.uid
+          && request.resource.data.authorId == resource.data.authorId
+          ) || (request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['likes', 'likedBy', 'comments'])
+            && (!request.resource.data.diff(resource.data).affectedKeys()
+                .hasAny(['likes', 'likedBy']) || validLikeChange())
+            && (!request.resource.data.diff(resource.data).affectedKeys()
+                .hasAny(['comments']) || validCommentChange())));
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+    }
+
+    match /sheroesPosts/{postId} {
+      allow read: if isSheroesMember();
+      allow create: if isSheroesMember()
+        && request.resource.data.keys().hasOnly([
+          'authorId', 'author', 'text', 'category', 'imageUrl', 'imagePath',
+          'likes', 'likedBy', 'comments', 'createdAt'
+        ])
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.author == profileName(request.auth.uid)
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 500
+        && request.resource.data.imageUrl is string
+        && request.resource.data.imagePath is string
+        && ((request.resource.data.imageUrl == '' && request.resource.data.imagePath == '')
+          || (request.resource.data.imageUrl.size() <= 2048
+            && request.resource.data.imagePath.matches(
+              'sheroes-posts/' + request.auth.uid + '/' + postId + '/[^/]+'
+            )))
+        && (request.resource.data.text.size() > 0 || request.resource.data.imageUrl != '')
+        && request.resource.data.category in ['Daily moment', 'Wellbeing', 'Milestone']
+        && request.resource.data.likes == 0
+        && request.resource.data.likedBy is list
+        && request.resource.data.likedBy.size() == 0
+        && request.resource.data.comments is list
+        && request.resource.data.comments.size() == 0;
+      allow update: if isSheroesMember()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['likes', 'likedBy', 'comments'])
+        && (!request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['likes', 'likedBy']) || validSheroesLikeChange())
+        && (!request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['comments']) || validSheroesCommentChange());
+      allow delete: if isSheroesMember() && resource.data.authorId == request.auth.uid;
+    }
+
+    match /sheroesChallenges/{challengeId} {
+      allow read: if isSheroesMember();
+      allow create: if isSheroesMember()
+        && request.resource.data.keys().hasOnly([
+          'title', 'description', 'activity', 'target', 'startDate', 'endDate',
+          'ownerId', 'owner', 'participantCount', 'createdAt'
+        ])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 80
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 300
+        && request.resource.data.activity is string
+        && request.resource.data.activity.size() > 0
+        && request.resource.data.activity.size() <= 50
+        && request.resource.data.target is int
+        && request.resource.data.target >= 1
+        && request.resource.data.target <= 1000000
+        && request.resource.data.startDate is string
+        && request.resource.data.startDate.size() == 10
+        && request.resource.data.endDate is string
+        && request.resource.data.endDate.size() == 10
+        && request.resource.data.endDate >= request.resource.data.startDate
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.owner == profileName(request.auth.uid)
+        && request.resource.data.participantCount == 0;
+      allow update: if isSheroesMember()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participantCount'])
+        && request.resource.data.participantCount == resource.data.participantCount + 1
+        && !exists(/databases/$(database)/documents/sheroesChallenges/$(challengeId)/participants/$(request.auth.uid))
+        && existsAfter(/databases/$(database)/documents/sheroesChallenges/$(challengeId)/participants/$(request.auth.uid));
+      allow delete: if false;
+
+      match /participants/{uid} {
+        allow read: if isSheroesMember();
+        allow create: if isSheroesMember()
+          && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['userId', 'name', 'progress', 'joinedAt', 'updatedAt'])
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.name == profileName(request.auth.uid)
+          && request.resource.data.progress == 0
+          && exists(/databases/$(database)/documents/sheroesChallenges/$(challengeId));
+        allow update: if isSheroesMember()
+          && request.auth.uid == uid
+          && resource.data.userId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['progress', 'updatedAt'])
+          && request.resource.data.progress is int
+          && request.resource.data.progress >= 0
+          && request.resource.data.progress <= 1000000;
+        allow delete: if false;
+      }
+    }
+
+    match /plans/{planId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.hostId == request.auth.uid
+        && request.resource.data.host == profileName(request.auth.uid)
+        && request.resource.data.maxPeople is int
+        && request.resource.data.maxPeople >= 2
+        && request.resource.data.maxPeople <= 100
+        && request.resource.data.members is list
+        && request.resource.data.members.size() == 1
+        && request.resource.data.members.hasAny([request.auth.uid]);
+      allow update: if signedIn()
+        && request.resource.data.hostId == resource.data.hostId
+        && request.resource.data.members is list
+        && request.resource.data.members.hasAny([request.auth.uid])
+        && request.resource.data.members.hasAll(resource.data.get('members', []))
+        && request.resource.data.maxPeople is int
+        && request.resource.data.maxPeople >= 2
+        && request.resource.data.maxPeople <= 100
+        && request.resource.data.maxPeople >= request.resource.data.members.size()
+        && (resource.data.hostId == request.auth.uid
+          || (isPlanMember(planId)
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['votes', 'voteBy', 'pinned'])));
+      allow delete: if signedIn() && resource.data.hostId == request.auth.uid;
+
+      match /joinRequests/{requesterUid} {
+        allow read: if signedIn()
+          && (request.auth.uid == requesterUid || ownsPlan(planId));
+        allow create: if signedIn()
+          && request.auth.uid == requesterUid
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.name == profileName(request.auth.uid)
+          && request.resource.data.email == request.auth.token.email
+          && request.resource.data.status == 'pending'
+          && planHasRoom(planId)
+          && !get(/databases/$(database)/documents/plans/$(planId)).data
+            .get('members', []).hasAny([request.auth.uid]);
+        allow update: if (ownsPlan(planId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+            && request.resource.data.status in ['accepted', 'declined'])
+          || (signedIn()
+            && request.auth.uid == requesterUid
+            && resource.data.status == 'declined'
+            && request.resource.data.status == 'pending'
+            && planHasRoom(planId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']));
+        allow delete: if signedIn()
+          && (ownsPlan(planId)
+            || (request.auth.uid == requesterUid && resource.data.status == 'pending'));
+      }
+
+      match /messages/{messageId} {
+        allow read: if isPlanMember(planId);
+        allow create: if isPlanMember(planId)
+          && request.resource.data.authorId == request.auth.uid
+          && request.resource.data.author == profileName(request.auth.uid)
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000;
+        allow update, delete: if false;
+      }
+    }
+
+    match /opportunities/{opportunityId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.owner == profileName(request.auth.uid)
+        && request.resource.data.team.hasAny([request.auth.uid]);
+      allow update: if signedIn()
+        && request.resource.data.ownerId == resource.data.ownerId
+        && (resource.data.ownerId == request.auth.uid
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['interested'])
+            && validInterestChange()));
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+    }
+  }
+}

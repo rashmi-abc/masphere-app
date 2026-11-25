@@ -1,0 +1,47 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSheroesMember() {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/sheroesMembers/$(request.auth.uid));
+    }
+
+    match /posts/{postId}/{fileName} {
+      allow read: if signedIn();
+      allow write: if signedIn()
+        && (request.resource == null
+          || (request.resource.size <= 50 * 1024 * 1024
+            && request.resource.contentType.matches('image/.*|video/.*')));
+    }
+
+    match /plans/{planId}/{fileName} {
+      allow read: if signedIn();
+      allow write: if signedIn()
+        && (request.resource == null
+          || (request.resource.size <= 10 * 1024 * 1024
+            && request.resource.contentType.matches('image/.*')));
+    }
+
+    match /users/{uid}/avatar/{fileName} {
+      allow read: if signedIn();
+      allow write: if signedIn()
+        && request.auth.uid == uid
+        && (request.resource == null
+          || (request.resource.size <= 10 * 1024 * 1024
+            && request.resource.contentType.matches('image/.*')));
+    }
+
+    match /sheroes-posts/{uid}/{postId}/{fileName} {
+      allow read: if isSheroesMember();
+      allow write: if isSheroesMember()
+        && request.auth.uid == uid
+        && (request.resource == null
+          || (request.resource.size <= 10 * 1024 * 1024
+            && request.resource.contentType.matches('image/.*')));
+    }
+  }
+}
